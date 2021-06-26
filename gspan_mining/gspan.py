@@ -183,8 +183,8 @@ class gSpan(object):
     """`gSpan` algorithm."""
 
     def __init__(self,
-                 database_file_name,
                  min_support=10,
+                 max_support=float('inf'),
                  min_num_vertices=1,
                  max_num_vertices=float('inf'),
                  max_ngraphs=float('inf'),
@@ -193,11 +193,11 @@ class gSpan(object):
                  visualize=False,
                  where=False):
         """Initialize gSpan instance."""
-        self._database_file_name = database_file_name
         self.graphs = dict()
         self._max_ngraphs = max_ngraphs
         self._is_undirected = is_undirected
         self._min_support = min_support
+        self._max_support = max_support
         self._min_num_vertices = min_num_vertices
         self._max_num_vertices = max_num_vertices
         self._DFScode = DFScode()
@@ -211,6 +211,7 @@ class gSpan(object):
         self._visualize = visualize
         self._where = where
         self.timestamps = dict()
+        self.subgraphs = []
         if self._max_num_vertices < self._min_num_vertices:
             print('Max number of vertices can not be smaller than '
                   'min number of that.\n'
@@ -236,9 +237,9 @@ class gSpan(object):
         return self
 
     @record_timestamp
-    def _read_graphs(self):
+    def read_graphs_from_file(self, database_file_name):
         self.graphs = dict()
-        with codecs.open(self._database_file_name, 'r', 'utf-8') as f:
+        with codecs.open(database_file_name, 'r', 'utf-8') as f:
             lines = [line.strip() for line in f.readlines()]
             tgraph, graph_cnt = None, 0
             for i, line in enumerate(lines):
@@ -262,6 +263,11 @@ class gSpan(object):
                 self.graphs[graph_cnt] = tgraph
         return self
 
+    def read_graphs_from_list(self, graph_list:list):
+        self.graphs = dict()
+        for g_idx, graph in enumerate(graph_list):
+            self.graphs[g_idx] = graph
+        
     @record_timestamp
     def _generate_1edge_frequent_subgraphs(self):
         vlb_counter = collections.Counter()
@@ -282,7 +288,7 @@ class gSpan(object):
                     vevlb_counted.add((g.gid, (vlb1, e.elb, vlb2)))
         # add frequent vertices.
         for vlb, cnt in vlb_counter.items():
-            if cnt >= self._min_support:
+            if cnt >= self._min_support and cnt <= self._max_support:
                 g = Graph(gid=next(self._counter),
                           is_undirected=self._is_undirected)
                 g.add_vertex(0, vlb)
@@ -297,7 +303,9 @@ class gSpan(object):
     @record_timestamp
     def run(self):
         """Run the gSpan algorithm."""
-        self._read_graphs()
+        #self._read_graphs()
+        if not self.graphs:
+            raise ValueError("The graph dictionaty is empty.")
         self._generate_1edge_frequent_subgraphs()
         if self._max_num_vertices < 2:
             return
@@ -314,7 +322,8 @@ class gSpan(object):
             self._DFScode.append(DFSedge(0, 1, vevlb))
             self._subgraph_mining(projected)
             self._DFScode.pop()
-
+        return self.subgraphs
+        
     def _get_support(self, projected):
         return len(set([pdfs.gid for pdfs in projected]))
 
@@ -506,12 +515,21 @@ class gSpan(object):
 
     def _subgraph_mining(self, projected):
         self._support = self._get_support(projected)
-        if self._support < self._min_support:
+        if self._support < self._min_support or self._support > self._max_support:
             return
         if not self._is_min():
             return
         self._report(projected)
-
+        
+        if self._DFScode.get_num_vertices() > self._min_num_vertices:
+            self.subgraphs.append( {
+                "graph": self._DFScode.to_graph(gid=next(self._counter),
+                                       is_undirected=self._is_undirected),
+               "supper": self._support,
+               "where": list(set([p.gid    for p in projected]))
+            })                      
+        
+           
         num_vertices = self._DFScode.get_num_vertices()
         self._DFScode.build_rmpath()
         rmpath = self._DFScode.rmpath
